@@ -1,0 +1,5 @@
+curl_cffi>=0.7.0
+beautifulsoup4>=4.12.0
+
+# Optionnel — requis uniquement pour engine="playwright"
+playwright>=1.44.0
