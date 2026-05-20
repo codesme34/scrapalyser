@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="scrapalyser",
-    version="0.1.1",
+    version="0.1.2",
     author="alex34500",
     description="Pre-scraping intelligence tool — scan a website before scraping it",
     long_description=open("README.md").read(),
