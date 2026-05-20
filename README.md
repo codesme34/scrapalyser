@@ -51,7 +51,7 @@ report = scrapalyser.scan(
 ```json
 {
   "url": "https://example.com",
-  "scanned_at": "2026-04-30T12:32:00Z",
+  "scanned_at": "2026-05-19T12:32:00Z",
   "status_code": 200,
   "engine": "curl",
   "antibot": {
@@ -89,7 +89,7 @@ report = scrapalyser.scan(
 ═══════════════════════════════════════════
         SCRAPALYSER RAPPORT
         https://example.com
-        Scanné le : 2026-04-30T12:32:00Z
+        Scanné le : 2026-05-19T12:32:00Z
         Status : 200
 ═══════════════════════════════════════════
 
@@ -121,14 +121,15 @@ report = scrapalyser.scan(
 
 ## Features
 
-- 🛡️ **Anti-bot detection** — Cloudflare, DataDome, PerimeterX, Akamai, Kasada, reCAPTCHA, hCaptcha
+- 🛡️ **Anti-bot detection** — Cloudflare, DataDome, PerimeterX, Akamai, Kasada, Imperva, Sucuri, reCAPTCHA, hCaptcha + Unknown/Custom antibot detection
 - 🖥️ **Technology detection** — React, Vue, Angular, Next.js, Nuxt, Svelte, WordPress, Shopify, Drupal, Joomla, Wix, Webflow
 - ⚡ **JS requirement detection** — know before you write whether `requests` is enough or Playwright is needed
 - 🌐 **API endpoint discovery** — via CSP headers, inline scripts, and XHR/Fetch interception (Playwright mode)
-- 🤖 **robots.txt parser** — URL extraction with common path variants
-- 🗺️ **Sitemap detection** — via robots.txt or direct probe
+- 🤖 **robots.txt parser** — URL extraction with common path variants (`/robot.txt`, `/robots.txt`)
+- 🗺️ **Sitemap detection** — via robots.txt or direct probe (`/sitemap.xml`, `/sitemaps.xml`...)
 - 🔐 **Login wall detection** — form, redirect, button, OAuth
 - 📸 **Screenshot** — capture the page as seen by the browser (Playwright mode)
+- 🚫 **Blocked by antibot** — if the site blocks you, all fields return `"blocked by antibot"` instantly
 - 🌍 **Multi-language output** — fr, en, es, br
 - 📄 **JSON & TXT export** — machine-readable or human-readable
 
@@ -138,11 +139,33 @@ report = scrapalyser.scan(
 
 | Feature | `curl` | `playwright` |
 |---|---|---|
-| Speed | Fast | Slower |
+| Speed | ⚡ Fast | 🐢 Slower |
 | JS execution | ❌ | ✅ |
 | XHR/Fetch API detection | ❌ | ✅ |
 | Screenshot | ❌ | ✅ |
-| Bot detection bypass | Partial | Better with `headless=False` |
+| Bot bypass | Partial | Better with `headless=False` |
+
+---
+
+## Anti-bot detection
+
+When the site blocks you (403, captcha page), scrapalyser reports which antibot is responsible
+and marks all other fields as `"blocked by antibot"` — so you know exactly what you're up
+against before writing anything.
+
+Supported:
+| Solution | Detection method |
+|---|---|
+| Cloudflare / Turnstile | `cf-ray` header, `__cf_bm` cookie |
+| DataDome | `x-datadome` header, `datadome` cookie |
+| PerimeterX | `_px` cookie, script patterns |
+| Akamai | `ak_bmsc` / `bm_sz` cookies |
+| Kasada | `kkrta` / `kasada.io` scripts |
+| Imperva | `x-iinfo` header, `incap_ses` cookie |
+| Sucuri | `x-sucuri-id` header |
+| reCAPTCHA | script pattern |
+| hCaptcha | script pattern |
+| Unknown / Custom | suspicious headers, cookies, obfuscated scripts |
 
 ---
 

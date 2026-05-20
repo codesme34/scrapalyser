@@ -19,18 +19,18 @@ async def detect(url: str, html: str) -> dict:
         soup = BeautifulSoup(html, "html.parser")
         body_text = soup.get_text(strip=True)
 
-        # Page sans aucun script = HTML statique, pas besoin de JS
+        # No scripts at all — static HTML, JS not required
         scripts = soup.find_all("script")
         if not scripts:
             return {"js_required": False}
 
-        # Détection shell SPA : div root/app vide + peu de contenu texte
+        # SPA shell detection: empty root/app div + low text content
         for pattern in JS_ROOT_PATTERNS:
             if pattern.lower() in html.lower():
                 if len(body_text) < MIN_CONTENT_LENGTH:
                     return {"js_required": True}
 
-        # Contenu texte très faible mais scripts présents = probablement SPA
+        # Very low text content with many scripts — likely a SPA
         if len(body_text) < MIN_CONTENT_LENGTH and len(scripts) > 3:
             return {"js_required": True}
 
