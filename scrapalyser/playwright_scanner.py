@@ -1,30 +1,16 @@
 import asyncio
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
 from .modules import antibot, technology, js_check, login_wall, robots
 from .modules.api import _is_excluded, EXCLUDED_EXTENSIONS
-from .output import json_output, txt_output
+from .blocking import is_blocked, diagnose
 
 BLOCKED = "blocked by antibot"
 
-CAPTCHA_MARKERS = [
-    "window._cf_chl_opt", "cf-browser-verification", "challenge-platform",
-    "just a moment", "checking your browser", "google.com/recaptcha",
-    "hcaptcha.com/1/api.js", "window._pxAppId", "_pxCaptcha",
-    "datadome.co/captcha", "please enable js and disable any ad blocker",
-    "var dd={'rt'", "access denied", "bot verification", "security check",
-]
-
-BLOCKED_STATUS_CODES = {403, 401, 429, 503}
-
 XHR_TYPES = {"xhr", "fetch"}
-
-
-def _is_captcha_page(html: str) -> bool:
-    html_lower = html.lower()
-    return any(m.lower() in html_lower for m in CAPTCHA_MARKERS)
 
 
 def _is_api_endpoint(url: str) -> bool:
@@ -42,12 +28,10 @@ def _is_api_endpoint(url: str) -> bool:
 
 async def _scan_playwright_async(
     url: str,
-    headless: bool = True,
-    output: str = "json",
-    lang: str = "en",
-    save: Optional[str] = None,
+    headless: bool = False,
     screenshot: Optional[str] = None,
-) -> Any:
+    proxy: Any = None,
+) -> dict[str, Any]:
     from playwright.async_api import async_playwright
     from curl_cffi.requests import AsyncSession
 
@@ -55,14 +39,23 @@ async def _scan_playwright_async(
     api_endpoints: list[str] = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            )
+        # Hides navigator.webdriver natively (a JS override would itself be detectable)
+        browser = await p.chromium.launch(
+            headless=headless,
+            args=["--disable-blink-features=AutomationControlled"],
+            proxy=proxy.for_playwright() if proxy else None,
         )
+        # Keep the real browser's user agent: a forced one (other OS / version)
+        # contradicts the rest of the fingerprint. Headless mode only needs
+        # "HeadlessChrome" renamed to "Chrome".
+        user_agent = None
+        if headless:
+            probe = await browser.new_page()
+            real_ua = await probe.evaluate("navigator.userAgent")
+            await probe.close()
+            # Real Chrome reports a reduced version ("Chrome/159.0.0.0")
+            user_agent = re.sub(r"HeadlessChrome/(\d+)[\d.]*", r"Chrome/\1.0.0.0", real_ua)
+        context = await browser.new_context(user_agent=user_agent)
         page = await context.new_page()
 
         def on_request(request):
@@ -73,19 +66,37 @@ async def _scan_playwright_async(
 
         page.on("request", on_request)
 
+        # Load the page once, then give it a few seconds to fire its API calls.
+        # (Navigating a second time after a networkidle timeout doubled the wait.)
+        load_error = "no response"
         try:
-            pw_response = await page.goto(url, wait_until="networkidle", timeout=20000)
-        except Exception:
+            pw_response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            pw_response = None
+            load_error = str(e).splitlines()[0]
+        if pw_response is not None:
             try:
-                pw_response = await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                await page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
-                pw_response = None
-            await asyncio.sleep(3)
+                pass  # pages with endless trackers never go idle: keep what we have
+
+        if pw_response is None:
+            # Nothing was loaded (bad proxy, DNS, network): not a pass
+            await browser.close()
+            raise RuntimeError(f"Playwright could not load {url}: {load_error}")
 
         html = await page.content()
+        # HTML as sent by the server, before any JS ran: tells if JS is needed
+        try:
+            raw_html = await pw_response.text()
+        except Exception:
+            raw_html = None
+        final_url = page.url
         status_code = pw_response.status if pw_response else 0
         headers = dict(pw_response.headers) if pw_response else {}
-        cookies = {c["name"].lower(): c["value"] for c in await context.cookies()}
+        # Only the site's cookies: ads and widgets set their own (e.g. __cf_bm from a
+        # third-party widget on Cloudflare) and would be mistaken for the site's antibot
+        cookies = {c["name"].lower(): c["value"] for c in await context.cookies(final_url)}
 
         screenshot_bytes = await page.screenshot(full_page=False)
         if screenshot:
@@ -94,7 +105,7 @@ async def _scan_playwright_async(
 
         await browser.close()
 
-    blocked = status_code in BLOCKED_STATUS_CODES or _is_captcha_page(html)
+    blocked = is_blocked(status_code, headers, html)
 
     class FakeResponse:
         def __init__(self, h, c, s, u):
@@ -103,7 +114,7 @@ async def _scan_playwright_async(
             self.status_code = s
             self.url = u
 
-    fake_resp = FakeResponse(headers, cookies, status_code, url)
+    fake_resp = FakeResponse(headers, cookies, status_code, final_url)
 
     antibot_result = await antibot.detect(fake_resp, html)
 
@@ -114,6 +125,7 @@ async def _scan_playwright_async(
             "status_code": status_code,
             "engine": "playwright",
             "antibot": antibot_result,
+            "blocking": diagnose(status_code, headers, html),
             "technology": BLOCKED,
             "js_required": BLOCKED,
             "api": BLOCKED,
@@ -125,11 +137,11 @@ async def _scan_playwright_async(
     else:
         tech_result, js_result, login_result = await asyncio.gather(
             technology.detect(fake_resp, html),
-            js_check.detect(url, html),
-            login_wall.detect(fake_resp, html),
+            js_check.detect(url, raw_html if raw_html is not None else html),
+            login_wall.detect(fake_resp, html, requested_url=url),
         )
 
-        async with AsyncSession(impersonate="chrome") as session:
+        async with AsyncSession(impersonate="chrome", proxy=proxy.for_curl() if proxy else None) as session:
             robots_result = await robots.detect(url, session)
 
         report = {
@@ -138,8 +150,9 @@ async def _scan_playwright_async(
             "status_code": status_code,
             "engine": "playwright",
             "antibot": antibot_result,
+            "blocking": None,
             "technology": tech_result,
-            "js_required": True if (tech_result or {}).get("type") in JS_FRAMEWORKS else (js_result.get("js_required") if js_result else None),
+            "js_required": js_result.get("js_required") if js_result else None,
             "api": {
                 "detected": len(api_endpoints) > 0,
                 "endpoints": api_endpoints,
@@ -150,16 +163,5 @@ async def _scan_playwright_async(
             "screenshot": screenshot if screenshot else None,
         }
 
-    if output == "txt":
-        rendered = txt_output.render(report, lang)
-        if save:
-            txt_output.save(report, save, lang)
-        print(rendered)
-        return rendered
-    else:
-        if save:
-            json_output.save(report, save)
-        return report
+    return report
 
-
-JS_FRAMEWORKS = {"Next.js", "Nuxt", "React", "Vue", "Angular", "Svelte"}

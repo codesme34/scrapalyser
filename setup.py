@@ -12,9 +12,12 @@ setup(
     install_requires=[
         "curl_cffi>=0.7.0",
         "beautifulsoup4>=4.12.0",
+        # Used automatically when curl_cffi is blocked
+        "playwright>=1.44.0",
     ],
     extras_require={
-        "playwright": ["playwright>=1.44.0"],
+        # Kept so that `pip install scrapalyser[playwright]` still works
+        "playwright": [],
     },
     python_requires=">=3.9",
     license="MIT",

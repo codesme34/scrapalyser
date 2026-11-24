@@ -33,9 +33,9 @@ async def detect(url: str, session: Any) -> dict:
                 if resp.status_code == 200 and resp.text.strip():
                     robots_result = {"found": True, "url": urljoin(base, path)}
 
-                    match = re.search(r"^Sitemap:\s*(.+)$", resp.text, re.MULTILINE | re.IGNORECASE)
+                    match = re.search(r"^\s*Sitemap:\s*(\S+)", resp.text, re.MULTILINE | re.IGNORECASE)
                     if match:
-                        sitemap_result = {"found": True, "url": urljoin(base, "/sitemap.xml")}
+                        sitemap_result = {"found": True, "url": urljoin(base, match.group(1).strip())}
                         sitemap_found_in_robots = True
                     break
             except Exception:
