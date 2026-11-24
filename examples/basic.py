@@ -26,8 +26,8 @@ report = scrapalyser.scan(
     screenshot="shot.png",
 )
 
-# Several sites in parallel: 4 scans at the same time, results in the same order
-reports = scrapalyser.scan_many(
+# Several sites: give a list, 4 scans at the same time, results in the same order
+reports = scrapalyser.scan(
     ["https://example.com", "https://example.org", "https://example.net"],
     workers=4,
 )

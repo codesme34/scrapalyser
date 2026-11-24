@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from .modules import antibot, technology, js_check, login_wall, robots
+from .modules import antibot, technology, js_check, login_wall, robots, embedded_data, rate_limit
 from .modules.api import _is_excluded, EXCLUDED_EXTENSIONS
 from .blocking import is_blocked, diagnose
 
@@ -47,6 +47,7 @@ async def _scan_playwright_async(
     headless: bool = False,
     screenshot: Optional[str] = None,
     proxy: Any = None,
+    timeout: float = 30.0,
 ) -> dict[str, Any]:
     from playwright.async_api import async_playwright
     from curl_cffi.requests import AsyncSession
@@ -96,13 +97,13 @@ async def _scan_playwright_async(
         # (Navigating a second time after a networkidle timeout doubled the wait.)
         load_error = "no response"
         try:
-            pw_response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            pw_response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
         except Exception as e:
             pw_response = None
             load_error = str(e).splitlines()[0]
         if pw_response is not None:
             try:
-                await page.wait_for_load_state("networkidle", timeout=10000)
+                await page.wait_for_load_state("networkidle", timeout=min(timeout, 10) * 1000)
             except Exception:
                 pass  # pages with endless trackers never go idle: keep what we have
 
@@ -154,9 +155,11 @@ async def _scan_playwright_async(
             "engine": "playwright",
             "antibot": antibot_result,
             "blocking": diagnose(status_code, headers, html),
+            "rate_limit": rate_limit.detect(headers),
             "technology": BLOCKED,
             "js_required": BLOCKED,
             "api": BLOCKED,
+            "embedded_data": BLOCKED,
             "robots_txt": BLOCKED,
             "sitemap": BLOCKED,
             "login_wall": BLOCKED,
@@ -170,7 +173,7 @@ async def _scan_playwright_async(
         )
 
         async with AsyncSession(impersonate="chrome", proxy=proxy.for_curl() if proxy else None) as session:
-            robots_result = await robots.detect(url, session)
+            robots_result = await robots.detect(url, session, timeout=min(timeout, 15))
 
         report = {
             "url": url,
@@ -179,12 +182,15 @@ async def _scan_playwright_async(
             "engine": "playwright",
             "antibot": antibot_result,
             "blocking": None,
+            "rate_limit": rate_limit.detect(headers),
             "technology": tech_result,
             "js_required": js_result.get("js_required") if js_result else None,
             "api": {
                 "detected": len(api_endpoints) > 0,
                 "endpoints": api_endpoints,
             },
+            # Raw server HTML: the data a scraper gets without running JS
+            "embedded_data": embedded_data.detect(raw_html if raw_html is not None else html),
             "robots_txt": robots_result.get("robots_txt") if robots_result else None,
             "sitemap": robots_result.get("sitemap") if robots_result else None,
             "login_wall": login_result,

@@ -4,7 +4,32 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> Pre-scraping intelligence tool. Scan any website before writing a single line of scraper.
+> **Scan a website before you write your scraper.**
+> scrapalyser tells you what protects the site, whether you will get blocked, which tool to use,
+> and where the data is.
+
+One scan answers the questions you would otherwise find out the hard way:
+
+- 🛡️ **Is there an antibot?** Cloudflare, DataDome, Akamai, PerimeterX, Kasada… and if it blocks you, **why**.
+- 🔁 **Which tool should I use?** curl_cffi is tried first, then a real browser (Playwright) if it gets blocked.
+- ⚡ **Do I need JavaScript?** Or is the page complete without it.
+- 📦 **Where is the data?** JSON already in the HTML (`__NEXT_DATA__`, JSON-LD…), API endpoints, sitemaps.
+- 🤖 **What are the rules?** robots.txt, crawl delay, rate limits, login wall.
+
+---
+
+## Contents
+
+1. [Install](#install)
+2. [Quick start](#quick-start)
+3. [Reading the report](#reading-the-report)
+4. [Options](#options)
+5. [Scanning several sites](#scanning-several-sites)
+6. [Using a proxy](#using-a-proxy)
+7. [Your IP affects the report](#your-ip-affects-the-report)
+8. [How it works](#how-it-works)
+9. [JSON reference](#json-reference)
+10. [Contributing](#contributing)
 
 ---
 
@@ -12,185 +37,41 @@
 
 ```bash
 pip install scrapalyser
-playwright install chromium
+playwright install chromium     # once: downloads the browser used when curl_cffi is blocked
 ```
+
+Python 3.9 or newer.
 
 ---
 
-## Usage
+## Quick start
+
+### In Python
 
 ```python
 import scrapalyser
 
-# Simple scan — returns a dict
-report = scrapalyser.scan("https://example.com")
-print(report)
+report = scrapalyser.scan("https://example.com")                # returns a dict (JSON)
+scrapalyser.scan("https://example.com", output="txt")           # prints a readable report
 
-# Full options
-report = scrapalyser.scan(
-    url="https://example.com",
-    output="txt",           # "json" (default) or "txt"
-    lang="en",              # "en" (default), "fr", "es", "br"
-    save="report.txt",      # optional — write output to file
-    engine="auto",          # "auto" (default), "curl" or "playwright"
-    headless=False,         # False (default, visible browser, harder to detect) or True — playwright only
-    screenshot="shot.png",  # optional — playwright only
-    proxy="http://user:pass@host:port",  # optional — used by both engines
-)
+# Several sites at once: give a list, choose how many run at the same time
+reports = scrapalyser.scan(["https://site1.com", "https://site2.com"], workers=4)
 ```
 
-## Your IP affects the report
+### In a terminal
 
-⚠️ Antibots judge **the IP that makes the request**, not only the request itself. The report
-describes what the site does **for that IP**, and that is true with or without a proxy:
+```bash
+scrapalyser https://example.com                  # readable report
+scrapalyser https://example.com --json           # JSON
+scrapalyser https://example.com --lang fr        # report in French (en, fr, es, br)
+scrapalyser --help                               # every option
+```
 
-- **Your own IP** may already be flagged: you scraped this site before, you were rate limited,
-  your network is shared (office, school, VPN, mobile carrier), or it belongs to a hosting
-  provider / datacenter (servers, cloud, CI). The site may block you while it lets other people through.
-- **A proxy IP** may be banned or flagged too. With a rotating proxy, each scan uses a different
-  IP: one can be blocked and the next one pass.
-- **The country** of the IP matters: some sites block, challenge or redirect foreign visitors.
-
-So a "blocked" report does not always mean the site blocks everyone, and a "passed" report does
-not guarantee your scraper will always get through. **Before drawing conclusions, scan a few
-times, and compare with and without a proxy.** The `blocking` diagnosis helps: `ip_banned`,
-`country_blocked` and `rate_limited` point to the IP, not to your code.
+`python -m scrapalyser ...` works too.
 
 ---
 
-## Scanning several sites (workers)
-
-`scan_many()` scans a list of sites in parallel. Choose how many scans run at the same time with `workers`:
-
-```python
-import scrapalyser
-
-reports = scrapalyser.scan_many(
-    ["https://site1.com", "https://site2.com", "https://site3.com"],
-    workers=4,              # 1 = one after the other, 4 (default), 10...
-    save_dir="reports",     # optional — one file per site: 001_site1.com.json, ...
-)
-```
-
-- Results come back **in the same order as the list**, whatever finishes first.
-- A site that fails does not stop the others: its result is `{"url": ..., "error": ...}`.
-- Same options as `scan()`: `output`, `lang`, `engine`, `headless`, `proxy`.
-- Each Playwright scan opens its own browser (~200–300 MB of RAM): 10 workers can mean 10 Chrome windows at once.
-- Workers are for scanning **different sites**. Many parallel scans of the same site is the fastest way to get blocked.
-
----
-
-## Using a proxy
-
-Pass your proxy with the `proxy` parameter. Write it in this format:
-
-```
-http://USER:PASSWORD@HOST:PORT
-```
-
-| Part | What to put | Example |
-|---|---|---|
-| `http://` | The proxy type. Keep `http://` unless your provider says otherwise | `http://` |
-| `USER` | The username your provider gave you | `alice` |
-| `PASSWORD` | The password your provider gave you | `s3cret` |
-| `HOST` | The proxy address | `gw.provider.com` |
-| `PORT` | The proxy port | `823` |
-
-```python
-import scrapalyser
-
-report = scrapalyser.scan(
-    "https://example.com",
-    proxy="http://alice:s3cret@gw.provider.com:823",
-)
-```
-
-Follow this format and scrapalyser will use your proxy with **both engines**: curl_cffi and
-Playwright, plus the robots.txt and sitemap requests. You write it once, scrapalyser converts it
-for each engine.
-
-Tip: keep the proxy out of your code. Put it in a `.env` file (and add `.env` to `.gitignore`):
-
-```
-PROXY="http://alice:s3cret@gw.provider.com:823"
-```
-
-```python
-import os
-report = scrapalyser.scan("https://example.com", proxy=os.environ["PROXY"])
-```
-
-> ⚠️ With a rotating proxy, each scan goes out through a different IP, so two scans of the same
-> site can give different results. See [Your IP affects the report](#your-ip-affects-the-report).
-
-### Other accepted formats
-
-Providers do not all give the proxy in the same shape. These are accepted too:
-
-| Format | Example |
-|---|---|
-| `USER:PASSWORD@HOST:PORT` | `alice:s3cret@gw.provider.com:823` |
-| `HOST:PORT:USER:PASSWORD` | `gw.provider.com:823:alice:s3cret` |
-| `USER:PASSWORD:HOST:PORT` | `alice:s3cret:gw.provider.com:823` |
-| `HOST:PORT` (proxy without password) | `1.2.3.4:8080` |
-
-### Good to know
-
-- **Proxy types:** `http://` (default), `https://`, `socks5://`, `socks5h://`, `socks4://`.
-- **SOCKS5 with a password does not work with Playwright** (Chromium limit). Use `http://` if you want both engines.
-- **Special characters** in the password (`@`, `:`) are fine.
-- **Wrong format:** scrapalyser raises a `ValueError` listing the accepted formats.
-- **Wrong password:** the error says the proxy refused the credentials (HTTP 407).
-- **Privacy:** the report shows only `HOST:PORT`, never your username or password.
-
----
-
-## Example output
-
-### JSON
-
-```json
-{
-  "url": "https://example.com",
-  "scanned_at": "2026-05-19T12:32:00Z",
-  "status_code": 200,
-  "engine": "curl",
-  "proxy": null,
-  "attempts": [
-    {"engine": "curl", "status_code": 200, "passed": true, "blocking": null}
-  ],
-  "antibot": {
-    "detected": true,
-    "name": "Cloudflare Turnstile"
-  },
-  "technology": {
-    "type": "React"
-  },
-  "js_required": true,
-  "api": {
-    "detected": true,
-    "endpoints": [
-      "https://api.example.com/v1/search"
-    ]
-  },
-  "robots_txt": {
-    "found": true,
-    "url": "https://example.com/robots.txt"
-  },
-  "sitemap": {
-    "found": true,
-    "url": "https://example.com/sitemap.xml"
-  },
-  "login_wall": {
-    "detected": false,
-    "type": null,
-    "login_available": true
-  },
-  "blocking": null
-}
-```
-
-### TXT
+## Reading the report
 
 ```
 ═══════════════════════════════════════════
@@ -205,22 +86,35 @@ Providers do not all give the proxy in the same shape. These are accepted too:
   👉  Engine to use for this site : curl_cffi
 
 [ANTI-BOT]
-  ⚠️  Detected : Cloudflare Turnstile
+  ⚠️  Detected : Cloudflare, reCAPTCHA
 
 [TECHNOLOGY]
-  🖥️  Type : React
+  🖥️  Type : Next.js
 
 [JAVASCRIPT]
-  ⚠️  JS required: Yes → use Playwright
+  ✅  JS required: No → curl_cffi is enough
 
 [DETECTED APIs]
   ✅  https://api.example.com/v1/search
 
+[EMBEDDED DATA]
+  💡  Data readable directly, no page parsing needed
+  ✅  JSON-LD (schema.org) → script[type="application/ld+json"] (~21 KB) : ItemList, BreadcrumbList
+  ✅  Next.js (__NEXT_DATA__) → script#__NEXT_DATA__ (~930 KB)
+
 [ROBOTS.TXT]
   ✅  https://example.com/robots.txt
+  ✅  Scanned page allowed for bots
+  ⏱️  Crawl-delay: 5 s between requests
 
 [SITEMAP]
-  ✅  https://example.com/sitemap.xml
+  ✅  https://example.com/sitemap-products.xml
+  ✅  https://example.com/sitemap-pages.xml
+
+[RATE LIMIT]
+  ⏱️  Limit : 100
+  ⏱️  Remaining : 99
+  ⏱️  Reset : 60
 
 [LOGIN WALL]
   ✅  No login required (optional login available)
@@ -228,107 +122,302 @@ Providers do not all give the proxy in the same shape. These are accepted too:
 ═══════════════════════════════════════════
 ```
 
-The text report is in English by default. Set `lang="fr"`, `"es"` or `"br"` for French, Spanish or Brazilian Portuguese.
+| Section | What it tells you |
+|---|---|
+| **Engines** | Which engine got through, and the one to use in your scraper |
+| **Anti-bot** | Every protection found on the site |
+| **Blocking** | Only when every engine is blocked: why, and what to try (see [Blocking reasons](#blocking-reasons)) |
+| **Technology** | The framework or CMS (Next.js, Nuxt, React, WordPress, Shopify…) |
+| **JavaScript** | Whether the page is complete without running JS |
+| **Detected APIs** | API endpoints the page calls: often easier to use than the HTML |
+| **Embedded data** | JSON already inside the HTML, and where to find it: read it instead of parsing the page |
+| **robots.txt** | Its URL, whether the scanned page is allowed, the delay asked between requests |
+| **Sitemap** | Every working sitemap: the list of the site's pages |
+| **Rate limit** | How many requests you get and how long to wait, when the server says so |
+| **Login wall** | Whether a login is **required**, or only available |
+
+When a site blocks every engine, the sections that need the page show `blocked by antibot`.
 
 ---
 
-## Features
+## Options
 
-- 🛡️ **Anti-bot detection** — Cloudflare, DataDome, PerimeterX, Akamai, Kasada, Imperva, Sucuri, reCAPTCHA, hCaptcha + Unknown/Custom antibot detection
-- 🖥️ **Technology detection** — React, Vue, Angular, Next.js, Nuxt, Svelte, WordPress, Shopify, Drupal, Joomla, Wix, Webflow
-- ⚡ **JS requirement detection** — know before you write whether curl_cffi is enough or Playwright is needed
-- 🌐 **API endpoint discovery** — via CSP headers, inline scripts, and XHR/Fetch interception (Playwright mode)
-- 🤖 **robots.txt parser** — URL extraction with common path variants (`/robot.txt`, `/robots.txt`)
-- 🗺️ **Sitemap detection** — via robots.txt or direct probe (`/sitemap.xml`, `/sitemaps.xml`...)
-- 🔐 **Login wall detection** — tells a *required* login (redirect, HTTP 401, login-only page) apart from an *optional* one (login button, OAuth)
-- ⚙️ **Parallel scans** — `scan_many(urls, workers=4)` scans a list of sites at the same time
-- 🔀 **Proxy support** — one `proxy="http://USER:PASSWORD@HOST:PORT"` works with both engines (see [Using a proxy](#using-a-proxy))
-- 📸 **Screenshot** — capture the page as seen by the browser (Playwright mode)
-- 🔁 **Automatic engine fallback** — curl_cffi first, Playwright if blocked; the report tells you which engine to use
-- 🚫 **Blocked by antibot** — if both engines are blocked, the other fields return `"blocked by antibot"`
-- ⛔ **Blocking diagnosis** — tells *why* you are blocked (IP banned, country blocked, browser signature, firewall rule, rate limit, JS challenge, captcha) with the Cloudflare error code, Ray ID and what to try next
-- 🌍 **Multi-language output** — fr, en, es, br
-- 📄 **JSON & TXT export** — machine-readable or human-readable
-
----
-
-## Engines
-
-By default (`engine="auto"`), scrapalyser tries **curl_cffi** first (fast, browser-like TLS
-fingerprint, no need for `requests`). If curl_cffi is blocked by an antibot, it retries with
-**Playwright** (real Chromium). The first engine that gets through produces the report, and the
-`attempts` field shows what each engine got, so you know which one to use for your scraper.
-The blocked report (with its `blocking` diagnosis) is only returned when **both** engines are blocked.
-
-Force a single engine with `engine="curl"` or `engine="playwright"`.
-
-| Feature | `curl` | `playwright` |
-|---|---|---|
-| Speed | ⚡ Fast | 🐢 Slower |
-| JS execution | ❌ | ✅ |
-| XHR/Fetch API detection | ❌ | ✅ |
-| Screenshot | ❌ | ✅ |
-| Bot bypass | Partial | Better (visible browser by default, `headless=False`) |
-
-Playwright runs with the real browser's user agent (no fake one that would contradict the rest of
-the fingerprint) and `navigator.webdriver` hidden. Keep the default `headless=False` when you can:
-headless Chromium is easier to spot (no plugins, software-rendered WebGL), so some sites send no data to it.
-
----
-
-## Anti-bot detection
-
-When the site blocks you (403, 429, captcha/challenge page) — with both engines in `auto` mode —
-scrapalyser reports which antibot is responsible, **why** you are blocked, and marks the other
-fields as `"blocked by antibot"`, so you know exactly what you're up against before writing anything.
-
-The `blocking` field (`null` when not blocked) explains the block:
-
-```json
-"blocking": {
-  "reason": "ip_banned",
-  "code": "1006",
-  "ray_id": "a5f6f386fedaef9a-MRS"
-}
+```python
+report = scrapalyser.scan(
+    url="https://example.com",  # one URL, or a list of URLs
+    output="json",          # "json" (default) or "txt"
+    lang="en",              # text report language: "en" (default), "fr", "es", "br"
+    save="report.txt",      # optional: write the report to a file
+    engine="auto",          # "auto" (default), "curl" or "playwright"
+    headless=False,         # Playwright: False (default) = visible browser, harder to detect
+    screenshot="shot.png",  # optional: Playwright screenshot
+    proxy="http://USER:PASSWORD@HOST:PORT",  # optional: see "Using a proxy"
+    timeout=30,             # seconds to wait for the page (default 30)
+    workers=4,              # with a list of URLs: how many sites are scanned at the same time (default 4)
+    save_dir="reports",     # optional: a folder, one report file per site
+)
 ```
 
-| `reason` | Meaning | What to try |
+| Option | Default | When to change it |
 |---|---|---|
-| `ip_banned` | Cloudflare 1005–1008 | Another IP (residential proxy): changing browser won't help |
-| `country_blocked` | Cloudflare 1009 | An IP in the site's country |
-| `browser_signature` | Cloudflare 1010 | Real browser / another TLS fingerprint |
-| `firewall_rule` | Cloudflare 1012, 1020 | Real browser, then another IP |
-| `rate_limited` | HTTP 429, Cloudflare 1015 | Slow down, rotate IPs |
-| `js_challenge` | Challenge page (`cf-mitigated`, "Just a moment…") | Real browser (Playwright) |
-| `captcha` | Turnstile, DataDome, PerimeterX, reCAPTCHA, hCaptcha | Real browser + captcha solver |
-| `access_denied` | Blocked, no specific reason found | Real browser, then another IP |
+| `engine` | `"auto"` | Force `"curl"` or `"playwright"` to test one engine only |
+| `headless` | `False` | `True` on a server without a screen (but headless is easier for antibots to spot) |
+| `timeout` | `30` | Raise it for slow sites or slow proxies |
+| `workers` | `4` | With a list of URLs: how many sites are scanned at the same time (see [Scanning several sites](#scanning-several-sites)) |
+| `save_dir` | — | A folder to write the reports, one file per site |
 
-Supported:
-| Solution | Detection method |
+Same options on the command line: `--engine`, `--headless`, `--timeout`, `--proxy`, `--save`,
+`--screenshot`, `--lang`, `--json`, and for several URLs `--workers` and `--save-dir`.
+
+---
+
+## Scanning several sites
+
+Give `scan()` a **list of URLs**. `workers` sets how many sites are scanned at the same time:
+
+```python
+reports = scrapalyser.scan(
+    ["https://site1.com", "https://site2.com", "https://site3.com"],
+    workers=4,              # 1 = one after the other, 4 (default), 10...
+    save_dir="reports",     # optional: one file per site (001_site1.com.json, ...)
+)
+```
+
+```bash
+scrapalyser https://site1.com https://site2.com https://site3.com --workers 4 --save-dir reports
+```
+
+- You get **a list of reports, in the same order as your URLs**.
+- A site that fails does not stop the others: its result is `{"url": ..., "error": ...}`.
+- All the other options work the same way (`proxy`, `engine`, `timeout`…). `save` and
+  `screenshot` take one URL: use `save_dir` with a list.
+- Each Playwright scan opens its own browser (~200–300 MB of RAM): 10 workers can mean 10 Chrome windows.
+- Use workers to scan **different sites**. Many parallel scans of the same site is the fastest way to get blocked.
+
+`scrapalyser.scan_many(urls, workers=4)` does the same thing, if you prefer a separate function.
+
+---
+
+## Using a proxy
+
+Write your proxy in this format:
+
+```
+http://USER:PASSWORD@HOST:PORT
+```
+
+| Part | What to put | Example |
+|---|---|---|
+| `http://` | The proxy type. Keep `http://` unless your provider says otherwise | `http://` |
+| `USER` | The username your provider gave you | `alice` |
+| `PASSWORD` | The password your provider gave you | `s3cret` |
+| `HOST` | The proxy address | `gw.provider.com` |
+| `PORT` | The proxy port | `823` |
+
+```python
+report = scrapalyser.scan("https://example.com", proxy="http://alice:s3cret@gw.provider.com:823")
+```
+
+Written this way, the proxy is used by **both engines** (curl_cffi and Playwright) and by the
+robots.txt and sitemap checks. You write it once, scrapalyser converts it for each engine.
+
+**Keep the proxy out of your code.** Put it in an environment variable or a `.env` file (and add
+`.env` to `.gitignore`):
+
+```python
+import os
+report = scrapalyser.scan("https://example.com", proxy=os.environ["PROXY"])
+```
+
+```bash
+export SCRAPALYSER_PROXY="http://USER:PASSWORD@HOST:PORT"   # read by the command line
+scrapalyser https://example.com
+```
+
+<details>
+<summary><b>Other accepted formats and details</b></summary>
+
+Providers do not all give the proxy in the same shape. These are accepted too:
+
+| Format | Example |
+|---|---|
+| `USER:PASSWORD@HOST:PORT` | `alice:s3cret@gw.provider.com:823` |
+| `HOST:PORT:USER:PASSWORD` | `gw.provider.com:823:alice:s3cret` |
+| `USER:PASSWORD:HOST:PORT` | `alice:s3cret:gw.provider.com:823` |
+| `HOST:PORT` (no password) | `1.2.3.4:8080` |
+
+- **Proxy types:** `http://` (default), `https://`, `socks5://`, `socks5h://`, `socks4://`.
+- **SOCKS5 with a password does not work with Playwright** (Chromium limit): use `http://` for both engines.
+- **Special characters** in the password (`@`, `:`) are fine.
+- **Wrong format:** a `ValueError` lists the accepted formats.
+- **Wrong password:** the error says the proxy refused the credentials (HTTP 407).
+- **Privacy:** the report shows only the proxy server (`http://HOST:PORT`), never your username or password.
+
+</details>
+
+---
+
+## Your IP affects the report
+
+⚠️ **The report describes what the site does for the IP that scanned it** — your own IP or a
+proxy's. Antibots judge the IP, not only the request:
+
+- **Your own IP** may already be flagged: you scraped this site before, you were rate limited,
+  your network is shared (office, school, VPN, mobile carrier), or it belongs to a datacenter
+  (servers, cloud, CI). The site may block you and let other people through.
+- **A proxy IP** may be banned or flagged too. With a rotating proxy, each scan uses a different
+  IP: one can be blocked and the next one pass.
+- **The country** of the IP matters: some sites block, challenge or redirect foreign visitors.
+
+So "blocked" does not always mean the site blocks everyone, and "passed" does not guarantee your
+scraper will always get through. The blocking reasons `ip_banned`, `country_blocked` and
+`rate_limited` point to the IP, not to your code.
+
+### For an accurate report, run several tests
+
+One scan is one IP at one moment. Before deciding how to build your scraper:
+
+1. Scan a few times **without a proxy** (your own IP).
+2. Scan a few times **with a proxy**.
+3. **Compare.** Always the same result: you can trust it. Different results: the site judges IPs
+   one by one, so plan for a proxy and retries in your scraper.
+
+Leave a little time between scans of the same site: scanning it many times in a row can itself
+get your IP flagged.
+
+---
+
+## How it works
+
+### Engines
+
+With `engine="auto"` (the default):
+
+1. **curl_cffi** is tried first: fast, with a real Chrome TLS fingerprint (no need for `requests`).
+2. If an antibot blocks it, **Playwright** (a real Chromium browser) tries.
+3. The first engine that gets through produces the report. The `attempts` field and the
+   `[ENGINES]` section show what each engine got.
+4. Only when **both** are blocked does the report explain the block.
+
+| | `curl` | `playwright` |
+|---|---|---|
+| Speed | ⚡ Fast | 🐢 Slower |
+| Runs JavaScript | ❌ | ✅ |
+| Sees API calls made by the page (XHR / fetch) | ❌ | ✅ |
+| Screenshot | ❌ | ✅ |
+| Gets past antibots | Sometimes | More often |
+
+Playwright keeps the real browser's user agent (no fake one that contradicts the rest of the
+fingerprint) and hides `navigator.webdriver`. Keep the visible browser (`headless=False`) when you
+can: headless Chromium has no plugins and a software graphics card, so some sites send it no data.
+
+### Antibots detected
+
+| Antibot | Detected by |
 |---|---|
 | Cloudflare | `cf-ray` header, `__cf_bm` cookie |
 | Cloudflare Turnstile | `challenges.cloudflare.com/turnstile` script |
-| DataDome | `x-datadome` header, `datadome` cookie |
-| PerimeterX | `_px` cookie, script patterns |
-| Akamai | `ak_bmsc` / `bm_sz` cookies |
-| Kasada | `kkrta` / `kasada.io` scripts |
-| Imperva | `x-iinfo` header, `incap_ses` cookie |
+| DataDome | `x-datadome` header, `datadome` cookie, captcha script |
+| PerimeterX (HUMAN) | `_px*` cookies, `px.js` / `client.perimeterx.net` scripts |
+| Akamai | `akamai-grn` header, `_abck` / `ak_bmsc` / `bm_sz` cookies, "Reference #" block pages |
+| Kasada | `x-kpsdk-*` headers, `KP_UIDz` / `tkrm_alpekz` cookies, `ips.js` script |
+| Imperva | `x-iinfo` header, `incap_ses` / `visid_incap` cookies |
 | Sucuri | `x-sucuri-id` header |
-| reCAPTCHA | script pattern |
-| hCaptcha | script pattern |
-| Unknown / Custom | suspicious headers, cookies, obfuscated scripts |
+| Fastly | `_fs_ch_*` challenge cookies |
+| AWS WAF / CloudFront | `x-amz-cf-id` header, `aws-waf-token` cookie |
+| reCAPTCHA | `/recaptcha/` script |
+| hCaptcha | `hcaptcha.com` script |
+| Unknown / Custom | suspicious headers, cookies and obfuscated scripts |
+
+A site often stacks several (a CDN, a bot manager, a captcha): all of them are listed.
+
+### Blocking reasons
+
+When every engine is blocked, the `blocking` field says why:
+
+```json
+"blocking": {"reason": "ip_banned", "code": "1006", "ray_id": "a5f6f386fedaef9a-MRS"}
+```
+
+| `reason` | Seen as | What to try |
+|---|---|---|
+| `ip_banned` | Cloudflare 1005–1008 | Another IP (residential proxy): changing browser won't help |
+| `country_blocked` | Cloudflare 1009 | An IP in the site's country |
+| `browser_signature` | Cloudflare 1010 | A real browser, or another TLS fingerprint |
+| `firewall_rule` | Cloudflare 1012 / 1020, AWS WAF | A real browser, then another IP |
+| `rate_limited` | HTTP 429, Cloudflare 1015 | Slow down, rotate IPs |
+| `js_challenge` | "Just a moment…", Kasada challenge | A real browser (Playwright) |
+| `captcha` | Turnstile, DataDome, PerimeterX, reCAPTCHA, hCaptcha | A real browser + a captcha solver |
+| `access_denied` | Blocked, no specific reason found | A real browser, then another IP |
+
+---
+
+## JSON reference
+
+`scan()` returns this dict (and `output="json"` / `--json` prints it):
+
+```json
+{
+  "url": "https://example.com",
+  "scanned_at": "2026-05-19T12:32:00Z",
+  "status_code": 200,
+  "engine": "curl",
+  "proxy": null,
+  "attempts": [{"engine": "curl", "status_code": 200, "passed": true, "blocking": null}],
+  "antibot": {"detected": true, "name": "Cloudflare", "all": ["Cloudflare", "reCAPTCHA"]},
+  "blocking": null,
+  "rate_limit": {"detected": true, "limit": "100", "remaining": "99", "reset": "60",
+                 "retry_after": null, "policy": null, "headers": {"x-ratelimit-limit": "100"}},
+  "technology": {"type": "Next.js"},
+  "js_required": false,
+  "api": {"detected": true, "endpoints": ["https://api.example.com/v1/search"]},
+  "embedded_data": {"detected": true, "sources": [
+    {"type": "JSON-LD (schema.org)", "selector": "script[type=\"application/ld+json\"]",
+     "size": 21960, "schema_types": ["ItemList", "BreadcrumbList"]},
+    {"type": "Next.js (__NEXT_DATA__)", "selector": "script#__NEXT_DATA__", "size": 952396}
+  ]},
+  "robots_txt": {"found": true, "url": "https://example.com/robots.txt", "allowed": true, "crawl_delay": 5.0},
+  "sitemap": {"found": true, "url": "https://example.com/sitemap-products.xml",
+              "urls": ["https://example.com/sitemap-products.xml", "https://example.com/sitemap-pages.xml"],
+              "declared_in_robots": 2},
+  "login_wall": {"detected": false, "type": null, "login_available": true}
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `engine` | The engine that produced the report (`curl` or `playwright`) |
+| `proxy` | The proxy server used (`http://HOST:PORT`), never the credentials; `null` without proxy |
+| `attempts` | Every engine tried, in order, and whether it got through |
+| `antibot.all` | Every protection found; `antibot.name` is the first one |
+| `blocking` | `null` when an engine got through, otherwise the [blocking reason](#blocking-reasons) |
+| `rate_limit` | Values read from `Retry-After`, `X-RateLimit-*`, `RateLimit-*` headers |
+| `js_required` | `false` when the HTML sent by the server already holds the content |
+| `embedded_data.sources` | Each JSON source: `selector` to find it, `size` in bytes, schema.org types for JSON-LD |
+| `robots_txt.allowed` | Whether robots.txt allows the scanned page; `crawl_delay` in seconds |
+| `sitemap.urls` | Every working sitemap; `sitemap.url` is the first one |
+| `login_wall` | `detected` = login **required**; `login_available` = optional login |
+| `screenshot` | Playwright only: the screenshot path, if asked |
+
+When every engine is blocked, `technology`, `js_required`, `api`, `embedded_data`, `robots_txt`,
+`sitemap` and `login_wall` are `"blocked by antibot"`.
 
 ---
 
 ## Contributing
 
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feat/my-feature`)
-3. Commit your changes
-4. Open a pull request
+1. Fork the repo and create a branch (`git checkout -b feat/my-feature`).
+2. Install the dev dependencies and run the tests (offline, no browser needed):
+   ```bash
+   pip install -e ".[dev]"
+   pytest
+   ```
+3. Commit your changes and open a pull request.
 
----
+## Changelog
+
+See [CHANGELOG.md](https://github.com/alex34500/scrapalyser/blob/main/CHANGELOG.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/alex34500/scrapalyser/blob/main/LICENSE).

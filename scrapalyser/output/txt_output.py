@@ -1,5 +1,6 @@
 from typing import Any
 from ..i18n.labels import LABELS
+from ..modules.robots import MAX_SITEMAPS_CHECKED
 
 SEP = "═" * 43
 BLOCKED = "blocked by antibot"
@@ -92,6 +93,22 @@ def render(report: dict[str, Any], lang: str = "en") -> str:
     else:
         lines.append(f"  —  {L['api_none']}")
 
+    # Embedded data
+    lines.append(f"\n[{L['embedded']}]")
+    embedded = report.get("embedded_data")
+    if _blocked(embedded):
+        lines.append(f"  ⚠️  {L['blocked']}")
+    elif isinstance(embedded, dict) and embedded.get("detected"):
+        lines.append(f"  💡  {L['embedded_hint']}")
+        for src in embedded.get("sources", []):
+            size_kb = max(1, round(src.get("size", 0) / 1024))
+            line = f"  ✅  {src['type']} → {src['selector']} (~{size_kb} KB)"
+            if src.get("schema_types"):
+                line += f" : {', '.join(src['schema_types'][:8])}"
+            lines.append(line)
+    elif isinstance(embedded, dict):
+        lines.append(f"  —  {L['embedded_none']}")
+
     # Robots.txt
     lines.append(f"\n[{L['robots']}]")
     robots = report.get("robots_txt")
@@ -99,6 +116,13 @@ def render(report: dict[str, Any], lang: str = "en") -> str:
         lines.append(f"  ⚠️  {L['blocked']}")
     elif isinstance(robots, dict) and robots.get("found"):
         lines.append(f"  ✅  {robots.get('url', '')}")
+        if robots.get("allowed") is True:
+            lines.append(f"  ✅  {L['robots_allowed']}")
+        elif robots.get("allowed") is False:
+            lines.append(f"  ⚠️  {L['robots_disallowed']}")
+        if robots.get("crawl_delay") is not None:
+            delay = robots["crawl_delay"]
+            lines.append(f"  ⏱️  {L['crawl_delay'].format(n=int(delay) if delay == int(delay) else delay)}")
     else:
         lines.append(f"  —  {L['not_found']}")
 
@@ -108,9 +132,26 @@ def render(report: dict[str, Any], lang: str = "en") -> str:
     if _blocked(sitemap):
         lines.append(f"  ⚠️  {L['blocked']}")
     elif isinstance(sitemap, dict) and sitemap.get("found"):
-        lines.append(f"  ✅  {sitemap.get('url', '')}")
+        for sitemap_url in sitemap.get("urls") or [sitemap.get("url", "")]:
+            lines.append(f"  ✅  {sitemap_url}")
+        declared = sitemap.get("declared_in_robots") or 0
+        if declared > len(sitemap.get("urls") or []):
+            lines.append(f"  •  {L['sitemaps_declared'].format(n=declared, m=min(declared, MAX_SITEMAPS_CHECKED))}")
     else:
         lines.append(f"  —  {L['not_found']}")
+
+    # Rate limit
+    lines.append(f"\n[{L['rate_limit']}]")
+    rate = report.get("rate_limit")
+    if isinstance(rate, dict) and rate.get("detected"):
+        for key, label in (("limit", "rate_limit_value"), ("remaining", "rate_remaining"),
+                           ("reset", "rate_reset"), ("retry_after", "rate_retry_after")):
+            if rate.get(key) is not None:
+                lines.append(f"  ⏱️  {L[label]} : {rate[key]}")
+        if rate.get("policy"):
+            lines.append(f"  •  Policy : {rate['policy']}")
+    else:
+        lines.append(f"  —  {L['rate_none']}")
 
     # Login wall
     lines.append(f"\n[{L['login_wall']}]")

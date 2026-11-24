@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="scrapalyser",
-    version="0.1.2",
+    version="0.2.0",
     author="alex34500",
     description="Pre-scraping intelligence tool — scan a website before scraping it",
     long_description=open("README.md").read(),
@@ -18,6 +18,10 @@ setup(
     extras_require={
         # Kept so that `pip install scrapalyser[playwright]` still works
         "playwright": [],
+        "dev": ["pytest>=7.0"],
+    },
+    entry_points={
+        "console_scripts": ["scrapalyser=scrapalyser.cli:main"],
     },
     python_requires=">=3.9",
     license="MIT",
