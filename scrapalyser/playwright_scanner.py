@@ -13,6 +13,22 @@ BLOCKED = "blocked by antibot"
 XHR_TYPES = {"xhr", "fetch"}
 
 
+async def _read_content(page: Any, tries: int = 5) -> str:
+    """page.content() fails while the page navigates (a solved challenge reloading):
+    wait for the new page instead of giving up."""
+    for _ in range(tries):
+        try:
+            return await page.content()
+        except Exception as e:
+            if "navigating" not in str(e):
+                raise
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:
+                pass
+    return await page.content()
+
+
 def _is_api_endpoint(url: str) -> bool:
     try:
         parsed = urlparse(url)
@@ -66,6 +82,16 @@ async def _scan_playwright_async(
 
         page.on("request", on_request)
 
+        # Challenge pages (Cloudflare, Fastly...) reload the page once solved:
+        # keep the last main document response, not the challenge's
+        documents: list = []
+
+        def on_response(response):
+            if response.request.is_navigation_request() and response.frame == page.main_frame:
+                documents.append(response)
+
+        page.on("response", on_response)
+
         # Load the page once, then give it a few seconds to fire its API calls.
         # (Navigating a second time after a networkidle timeout doubled the wait.)
         load_error = "no response"
@@ -85,7 +111,9 @@ async def _scan_playwright_async(
             await browser.close()
             raise RuntimeError(f"Playwright could not load {url}: {load_error}")
 
-        html = await page.content()
+        html = await _read_content(page)
+        if documents:
+            pw_response = documents[-1]
         # HTML as sent by the server, before any JS ran: tells if JS is needed
         try:
             raw_html = await pw_response.text()

@@ -39,6 +39,47 @@ report = scrapalyser.scan(
 )
 ```
 
+## Your IP affects the report
+
+⚠️ Antibots judge **the IP that makes the request**, not only the request itself. The report
+describes what the site does **for that IP**, and that is true with or without a proxy:
+
+- **Your own IP** may already be flagged: you scraped this site before, you were rate limited,
+  your network is shared (office, school, VPN, mobile carrier), or it belongs to a hosting
+  provider / datacenter (servers, cloud, CI). The site may block you while it lets other people through.
+- **A proxy IP** may be banned or flagged too. With a rotating proxy, each scan uses a different
+  IP: one can be blocked and the next one pass.
+- **The country** of the IP matters: some sites block, challenge or redirect foreign visitors.
+
+So a "blocked" report does not always mean the site blocks everyone, and a "passed" report does
+not guarantee your scraper will always get through. **Before drawing conclusions, scan a few
+times, and compare with and without a proxy.** The `blocking` diagnosis helps: `ip_banned`,
+`country_blocked` and `rate_limited` point to the IP, not to your code.
+
+---
+
+## Scanning several sites (workers)
+
+`scan_many()` scans a list of sites in parallel. Choose how many scans run at the same time with `workers`:
+
+```python
+import scrapalyser
+
+reports = scrapalyser.scan_many(
+    ["https://site1.com", "https://site2.com", "https://site3.com"],
+    workers=4,              # 1 = one after the other, 4 (default), 10...
+    save_dir="reports",     # optional — one file per site: 001_site1.com.json, ...
+)
+```
+
+- Results come back **in the same order as the list**, whatever finishes first.
+- A site that fails does not stop the others: its result is `{"url": ..., "error": ...}`.
+- Same options as `scan()`: `output`, `lang`, `engine`, `headless`, `proxy`.
+- Each Playwright scan opens its own browser (~200–300 MB of RAM): 10 workers can mean 10 Chrome windows at once.
+- Workers are for scanning **different sites**. Many parallel scans of the same site is the fastest way to get blocked.
+
+---
+
 ## Using a proxy
 
 Pass your proxy with the `proxy` parameter. Write it in this format:
@@ -78,6 +119,9 @@ PROXY="http://alice:s3cret@gw.provider.com:823"
 import os
 report = scrapalyser.scan("https://example.com", proxy=os.environ["PROXY"])
 ```
+
+> ⚠️ With a rotating proxy, each scan goes out through a different IP, so two scans of the same
+> site can give different results. See [Your IP affects the report](#your-ip-affects-the-report).
 
 ### Other accepted formats
 
@@ -197,6 +241,7 @@ The text report is in English by default. Set `lang="fr"`, `"es"` or `"br"` for 
 - 🤖 **robots.txt parser** — URL extraction with common path variants (`/robot.txt`, `/robots.txt`)
 - 🗺️ **Sitemap detection** — via robots.txt or direct probe (`/sitemap.xml`, `/sitemaps.xml`...)
 - 🔐 **Login wall detection** — tells a *required* login (redirect, HTTP 401, login-only page) apart from an *optional* one (login button, OAuth)
+- ⚙️ **Parallel scans** — `scan_many(urls, workers=4)` scans a list of sites at the same time
 - 🔀 **Proxy support** — one `proxy="http://USER:PASSWORD@HOST:PORT"` works with both engines (see [Using a proxy](#using-a-proxy))
 - 📸 **Screenshot** — capture the page as seen by the browser (Playwright mode)
 - 🔁 **Automatic engine fallback** — curl_cffi first, Playwright if blocked; the report tells you which engine to use

@@ -25,3 +25,11 @@ report = scrapalyser.scan(
     headless=True,
     screenshot="shot.png",
 )
+
+# Several sites in parallel: 4 scans at the same time, results in the same order
+reports = scrapalyser.scan_many(
+    ["https://example.com", "https://example.org", "https://example.net"],
+    workers=4,
+)
+for r in reports:
+    print(r["url"], r.get("error") or r["attempts"])
