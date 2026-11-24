@@ -416,8 +416,8 @@ When every engine is blocked, `technology`, `js_required`, `api`, `embedded_data
 
 ## Changelog
 
-See [CHANGELOG.md](https://github.com/alex34500/scrapalyser/blob/main/CHANGELOG.md).
+See [CHANGELOG.md](https://github.com/codesme34/scrapalyser/blob/main/CHANGELOG.md).
 
 ## License
 
-MIT — see [LICENSE](https://github.com/alex34500/scrapalyser/blob/main/LICENSE).
+MIT — see [LICENSE](https://github.com/codesme34/scrapalyser/blob/main/LICENSE).
